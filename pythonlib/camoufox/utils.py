@@ -40,7 +40,6 @@ CACHE_PREFS = {
     'browser.cache.disk.smart_size.enabled': True,
 }
 
-
 def get_env_vars(
     config_map: Dict[str, str], user_agent_os: str
 ) -> Dict[str, Union[str, float, bool]]:
@@ -68,9 +67,21 @@ def get_env_vars(
             sys.exit(1)
 
     if OS_NAME == 'lin':
-        fontconfig_path = get_path(os.path.join("fontconfig", user_agent_os))
-        env_vars['FONTCONFIG_PATH'] = fontconfig_path
+        # the user_agent_os is either 'lin', 'mac', or 'win' but our fontconfigs directory is 'linux', 'macos', or 'windows'
+        directory_map = {
+            'lin': 'linux',
+            'mac': 'macos',
+            'win': 'windows',
+        }
+        os_dir = directory_map.get(user_agent_os, user_agent_os)
+        fontconfig_path = get_path(os.path.join("fontconfigs", os_dir))
 
+        # assert that fonts.conf exists in the directory
+        if not os.path.exists(os.path.join(fontconfig_path, "fonts.conf")):
+            # puke violently if fonts.conf doesn't exist!!
+            raise FileNotFoundError(f"fonts.conf not found in {fontconfig_path}!  Something ain't right with your camoufox bundle.")
+
+        env_vars['FONTCONFIG_PATH'] = get_path(fontconfig_path)
     return env_vars
 
 
