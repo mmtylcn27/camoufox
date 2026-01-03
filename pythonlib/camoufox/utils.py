@@ -1,5 +1,6 @@
 import os
 import sys
+import secrets
 from os import environ
 from os.path import abspath
 from pathlib import Path
@@ -550,8 +551,11 @@ def launch_options(
         update_fonts(config, target_os)
 
     # Set a fixed font spacing seed
-    set_into(config, 'fonts:spacing_seed', randint(0, 1_073_741_823))  # nosec
-
+    set_into(config, 'fonts:spacing_seed', secrets.randbits(32))  # nosec
+    # Set noise seeds
+    set_into(config, 'canvas:noiseSeed', secrets.randbits(32))
+    set_into(config, 'webGl:noiseSeed', secrets.randbits(32))
+    set_into(config, 'audioContext:noiseSeed', secrets.randbits(32))
     # Set geolocation
     if geoip:
         geoip_allowed()  # Assert that geoip is allowed

@@ -308,5 +308,8 @@
 
     "websocket:remapping:enabled": "bool",
     "websocket:remapping:manualPortMappings": "array[str]",
-    "websocket:remapping:basePort": "int[>0]"
+    "websocket:remapping:basePort": "int[>0]",
+    "canvas:noiseSeed": "int[>0]",
+    "webGl:noiseSeed": "int[>0]",
+    "audioContext:noiseSeed": "int[>0]"
 }
