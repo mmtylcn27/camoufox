@@ -2,22 +2,25 @@
 Helper to extract values from the CAMOU_CONFIG environment variable(s).
 Written by daijro.
 */
-
 #pragma once
-#include "json.hpp"
-#include <memory>
+#include "simdjson.h"
 #include <string>
 #include <tuple>
 #include <optional>
-#include <codecvt>
+#include <mutex>
 #include "mozilla/glue/Debug.h"
 #include <cstdlib>
 #include <cstdio>
-#include <mutex>
 #include <variant>
 #include <cstddef>
 #include <vector>
 #include <algorithm>
+#include <array>
+#include <cstdint>
+#include <limits>
+#include <cctype>
+#include "mozilla/RWLock.h"
+#include <unordered_map>
 
 #ifdef _WIN32
 #  include <windows.h>
@@ -33,12 +36,17 @@ inline std::optional<std::string> get_env_utf8(const std::string& name) {
   if (size == 0) return std::nullopt;  // Environment variable not found
 
   std::vector<wchar_t> buffer(size);
-  GetEnvironmentVariableW(wName.c_str(), buffer.data(), size);
-  std::wstring wValue(buffer.data());
+  DWORD result = GetEnvironmentVariableW(wName.c_str(), buffer.data(), size);
+  if (result == 0 || result >= size) return std::nullopt;
+  std::wstring wValue(buffer.data(), result);
 
-  // Convert UTF-16 to UTF-8
-  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-  return converter.to_bytes(wValue);
+  // Convert UTF-16 to UTF-8 using WideCharToMultiByte
+  int utf8Size = WideCharToMultiByte(CP_UTF8, 0, wValue.c_str(), -1, nullptr, 0, nullptr, nullptr);
+  if (utf8Size == 0) return std::nullopt;
+  
+  std::vector<char> utf8Buffer(utf8Size);
+  WideCharToMultiByte(CP_UTF8, 0, wValue.c_str(), -1, utf8Buffer.data(), utf8Size, nullptr, nullptr);
+  return std::string(utf8Buffer.data());
 #else
   const char* value = std::getenv(name.c_str());
   if (!value) return std::nullopt;
@@ -46,83 +54,139 @@ inline std::optional<std::string> get_env_utf8(const std::string& name) {
 #endif
 }
 
-inline const nlohmann::json& GetJson() {
+
+// Parse CAMOU_CONFIG (and CAMOU_CONFIG_1..N) exactly once, keep it alive forever.
+// NOTE: Returned dom::element references internal data owned by the static parser/tape.
+inline const simdjson::dom::element& GetJson() {
   static std::once_flag initFlag;
-  static nlohmann::json jsonConfig;
+
+  static simdjson::padded_string jsonPadded;
+  static simdjson::dom::parser parser;
+  static simdjson::dom::element root;
 
   std::call_once(initFlag, []() {
-    std::string jsonString;
+    std::vector<std::string> parts;
     int index = 1;
+    size_t totalSize = 0;
 
     while (true) {
       std::string envName = "CAMOU_CONFIG_" + std::to_string(index);
-      auto partialConfig = get_env_utf8(envName);
-      if (!partialConfig) break;
+      auto partial = get_env_utf8(envName);
+      if (!partial) break;
+      totalSize += partial->size();
+      parts.push_back(std::move(*partial));
+      ++index;
+    }
 
-      jsonString += *partialConfig;
-      index++;
+    std::string jsonString;
+    jsonString.reserve(totalSize);
+    for (const auto& p : parts) jsonString += p;
+
+    if (jsonString.empty()) {
+      // Fallback to single CAMOU_CONFIG
+      auto original = get_env_utf8("CAMOU_CONFIG");
+      if (original) jsonString = *original;
     }
 
     if (jsonString.empty()) {
-      // Check for the original CAMOU_CONFIG as fallback
-      auto originalConfig = get_env_utf8("CAMOU_CONFIG");
-      if (originalConfig) jsonString = *originalConfig;
-    }
-
-    if (jsonString.empty()) {
-      jsonConfig = nlohmann::json{};
+      jsonPadded = simdjson::padded_string(std::string_view("{}"));
+      (void)parser.parse(jsonPadded).get(root);
       return;
     }
 
-    // Validate
-    if (!nlohmann::json::accept(jsonString)) {
+    jsonPadded = simdjson::padded_string(std::move(jsonString));
+
+    auto err = parser.parse(jsonPadded).get(root);
+    if (err) {
       printf_stderr("ERROR: Invalid JSON passed to CAMOU_CONFIG!\n");
-      jsonConfig = nlohmann::json{};
-      return;
+      jsonPadded = simdjson::padded_string(std::string_view("{}"));
+      (void)parser.parse(jsonPadded).get(root);
     }
-
-    jsonConfig = nlohmann::json::parse(jsonString);
   });
 
-  return jsonConfig;
-}
-
-inline bool HasKey(const std::string& key, const nlohmann::json& data) {
-  return data.contains(key);
+  return root;
 }
 
 inline std::optional<std::string> GetString(const std::string& key) {
   const auto& data = GetJson();
-  if (!HasKey(key, data)) return std::nullopt;
-  return data[key].get<std::string>();
+  simdjson::dom::object obj;
+  if (data.get(obj)) return std::nullopt;
+
+  simdjson::dom::element el;
+  if (obj.at_key(key).get(el)) return std::nullopt;
+
+  std::string_view sv;
+  if (el.get(sv)) return std::nullopt;
+  return std::string(sv);
 }
 
 inline std::vector<std::string> GetStringList(const std::string& key) {
   std::vector<std::string> result;
   const auto& data = GetJson();
-  if (!HasKey(key, data)) return {};
-  for (const auto& item : data[key]) {
-    result.push_back(item.get<std::string>());
+
+  simdjson::dom::object obj;
+  if (data.get(obj)) return result;
+
+  simdjson::dom::element el;
+  if (obj.at_key(key).get(el)) return result;
+
+  simdjson::dom::array arr;
+  if (el.get(arr)) return result;
+
+  for (auto v : arr) {
+    std::string_view sv;
+    if (!v.get(sv)) result.emplace_back(sv);
   }
   return result;
 }
 
 inline std::vector<std::string> GetStringListLower(const std::string& key) {
-  std::vector<std::string> result = GetStringList(key);
-  for (auto& str : result) {
-    std::transform(str.begin(), str.end(), str.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
+  static mozilla::RWLock cacheLock("GetStringListLowerCacheLock");
+  static std::unordered_map<std::string, std::vector<std::string>> cache;
+
+  {
+    mozilla::AutoReadLock readLock(cacheLock);
+    auto it = cache.find(key);
+    if (it != cache.end()) {
+      return it->second;
+    }
   }
-  return result;
+
+  auto result = GetStringList(key);
+  for (auto& s : result) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  }
+
+  {
+    mozilla::AutoWriteLock writeLock(cacheLock);
+    auto [it, inserted] = cache.emplace(key, std::move(result));
+    return it->second;
+  }
 }
 
 template <typename T>
 inline std::optional<T> GetUintImpl(const std::string& key) {
   const auto& data = GetJson();
-  if (!HasKey(key, data)) return std::nullopt;
-  if (data[key].is_number_unsigned()) return data[key].get<T>();
-  printf_stderr("ERROR: Value for key '%s' is not an unsigned integer\n",
-                key.c_str());
+  simdjson::dom::object obj;
+  if (data.get(obj)) return std::nullopt;
+
+  simdjson::dom::element el;
+  if (obj.at_key(key).get(el)) return std::nullopt;
+
+  uint64_t u = 0;
+  if (!el.get(u)) {
+    if (u > static_cast<uint64_t>(std::numeric_limits<T>::max())) return std::nullopt;
+    return static_cast<T>(u);
+  }
+
+  // Allow signed integers if non-negative
+  int64_t i = 0;
+  if (!el.get(i) && i >= 0) {
+    if (static_cast<uint64_t>(i) > static_cast<uint64_t>(std::numeric_limits<T>::max())) return std::nullopt;
+    return static_cast<T>(i);
+  }
+
   return std::nullopt;
 }
 
@@ -136,28 +200,50 @@ inline std::optional<uint32_t> GetUint32(const std::string& key) {
 
 inline std::optional<int32_t> GetInt32(const std::string& key) {
   const auto& data = GetJson();
-  if (!HasKey(key, data)) return std::nullopt;
-  if (data[key].is_number_integer()) return data[key].get<int32_t>();
-  printf_stderr("ERROR: Value for key '%s' is not an integer\n", key.c_str());
-  return std::nullopt;
+  simdjson::dom::object obj;
+  if (data.get(obj)) return std::nullopt;
+
+  simdjson::dom::element el;
+  if (obj.at_key(key).get(el)) return std::nullopt;
+
+  int64_t v = 0;
+  if (el.get(v)) return std::nullopt;
+  if (v < std::numeric_limits<int32_t>::min() || v > std::numeric_limits<int32_t>::max()) return std::nullopt;
+  return static_cast<int32_t>(v);
 }
 
 inline std::optional<double> GetDouble(const std::string& key) {
   const auto& data = GetJson();
-  if (!HasKey(key, data)) return std::nullopt;
-  if (data[key].is_number_float()) return data[key].get<double>();
-  if (data[key].is_number_unsigned() || data[key].is_number_integer())
-    return static_cast<double>(data[key].get<int64_t>());
-  printf_stderr("ERROR: Value for key '%s' is not a double\n", key.c_str());
+  simdjson::dom::object obj;
+  if (data.get(obj)) return std::nullopt;
+
+  simdjson::dom::element el;
+  if (obj.at_key(key).get(el)) return std::nullopt;
+
+  double d = 0.0;
+  if (!el.get(d)) return d;
+
+  // Allow integer numbers as doubles
+  int64_t i = 0;
+  if (!el.get(i)) return static_cast<double>(i);
+
+  uint64_t u = 0;
+  if (!el.get(u)) return static_cast<double>(u);
+
   return std::nullopt;
 }
 
 inline std::optional<bool> GetBool(const std::string& key) {
   const auto& data = GetJson();
-  if (!HasKey(key, data)) return std::nullopt;
-  if (data[key].is_boolean()) return data[key].get<bool>();
-  printf_stderr("ERROR: Value for key '%s' is not a boolean\n", key.c_str());
-  return std::nullopt;
+  simdjson::dom::object obj;
+  if (data.get(obj)) return std::nullopt;
+
+  simdjson::dom::element el;
+  if (obj.at_key(key).get(el)) return std::nullopt;
+
+  bool b = false;
+  if (el.get(b)) return std::nullopt;
+  return b;
 }
 
 inline bool CheckBool(const std::string& key) {
@@ -167,21 +253,25 @@ inline bool CheckBool(const std::string& key) {
 inline std::optional<std::array<uint32_t, 4>> GetRect(
     const std::string& left, const std::string& top, const std::string& width,
     const std::string& height) {
-  std::array<std::optional<uint32_t>, 4> values = {
-      GetUint32(left).value_or(0), GetUint32(top).value_or(0), GetUint32(width),
-      GetUint32(height)};
+  auto leftOpt = GetUint32(left);
+  auto topOpt = GetUint32(top);
+  auto widthOpt = GetUint32(width);
+  auto heightOpt = GetUint32(height);
 
-  if (!values[2].has_value() || !values[3].has_value()) {
-    if (values[2].has_value() ^ values[3].has_value())
+  if (!widthOpt.has_value() || !heightOpt.has_value()) {
+    if (widthOpt.has_value() ^ heightOpt.has_value())
       printf_stderr(
           "Both %s and %s must be provided. Using default behavior.\n",
-          height.c_str(), width.c_str());
+          width.c_str(), height.c_str());
     return std::nullopt;
   }
 
-  std::array<uint32_t, 4> result;
-  std::transform(values.begin(), values.end(), result.begin(),
-                 [](const auto& value) { return value.value(); });
+  std::array<uint32_t, 4> result = {
+      leftOpt.value_or(0),
+      topOpt.value_or(0),
+      widthOpt.value(),
+      heightOpt.value()
+  };
 
   return result;
 }
@@ -191,8 +281,12 @@ inline std::optional<std::array<int32_t, 4>> GetInt32Rect(
     const std::string& height) {
   if (auto optValue = GetRect(left, top, width, height)) {
     std::array<int32_t, 4> result;
-    std::transform(optValue->begin(), optValue->end(), result.begin(),
-                   [](const auto& val) { return static_cast<int32_t>(val); });
+    for (size_t i = 0; i < 4; ++i) {
+      if ((*optValue)[i] > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
+        return std::nullopt;  // Overflow would occur
+      }
+      result[i] = static_cast<int32_t>((*optValue)[i]);
+    }
     return result;
   }
   return std::nullopt;
@@ -200,113 +294,235 @@ inline std::optional<std::array<int32_t, 4>> GetInt32Rect(
 
 // Helpers for WebGL
 
-inline std::optional<nlohmann::json> GetNested(const std::string& domain,
-                                               std::string keyStr) {
-  auto data = GetJson();
-  if (!data.contains(domain)) return std::nullopt;
+inline std::optional<simdjson::dom::element> GetNested(const std::string& domain,
+                                                       const std::string& keyStr) {
+  const auto& root = GetJson();
 
-  if (!data[domain].contains(keyStr)) return std::nullopt;
+  simdjson::dom::object rootObj;
+  if (root.get(rootObj)) return std::nullopt;
 
-  return data[domain][keyStr];
+  simdjson::dom::element domainEl;
+  if (rootObj.at_key(domain).get(domainEl)) return std::nullopt;
+
+  simdjson::dom::object domainObj;
+  if (domainEl.get(domainObj)) return std::nullopt;
+
+  simdjson::dom::element out;
+  if (domainObj.at_key(keyStr).get(out)) return std::nullopt;
+
+  return out;
 }
 
 template <typename T>
-inline std::optional<T> GetAttribute(const std::string attrib, bool isWebGL2) {
+inline std::optional<T> GetAttribute(const std::string& attrib, bool isWebGL2) {
   auto value = MaskConfig::GetNested(
-      isWebGL2 ? "webGl2:contextAttributes" : "webGl:contextAttributes",
-      attrib);
+      isWebGL2 ? "webGl2:contextAttributes" : "webGl:contextAttributes", attrib);
   if (!value) return std::nullopt;
-  return value.value().get<T>();
+
+  if constexpr (std::is_same_v<T, bool>) {
+    bool b{};
+    if (value->get(b)) return std::nullopt;
+    return b;
+  } else if constexpr (std::is_integral_v<T> && std::is_signed_v<T>) {
+    int64_t i{};
+    if (value->get(i)) return std::nullopt;
+    if (i < std::numeric_limits<T>::min() || i > std::numeric_limits<T>::max())
+      return std::nullopt;
+    return static_cast<T>(i);
+  } else if constexpr (std::is_integral_v<T> && std::is_unsigned_v<T>) {
+    uint64_t u{};
+    if (value->get(u)) return std::nullopt;
+    if (u > std::numeric_limits<T>::max()) return std::nullopt;
+    return static_cast<T>(u);
+  } else if constexpr (std::is_floating_point_v<T>) {
+    double d{};
+    if (value->get(d)) return std::nullopt;
+    return static_cast<T>(d);
+  } else if constexpr (std::is_same_v<T, std::string>) {
+    std::string_view sv;
+    if (value->get(sv)) return std::nullopt;
+    return std::string(sv);
+  } else {
+    // Unsupported attribute type
+    return std::nullopt;
+  }
 }
 
-inline std::optional<
-    std::variant<int64_t, bool, double, std::string, std::nullptr_t>>
-GLParam(uint32_t pname, bool isWebGL2) {
-  auto value =
-      MaskConfig::GetNested(isWebGL2 ? "webGl2:parameters" : "webGl:parameters",
-                            std::to_string(pname));
+inline std::optional<std::variant<int64_t, bool, double, std::string, std::nullptr_t>> GLParam(uint32_t pname, bool isWebGL2) {
+  auto value = MaskConfig::GetNested(
+      isWebGL2 ? "webGl2:parameters" : "webGl:parameters", std::to_string(pname));
   if (!value) return std::nullopt;
-  auto data = value.value();
-  if (data.is_null()) return std::nullptr_t();
-  if (data.is_number_integer()) return data.get<int64_t>();
-  if (data.is_boolean()) return data.get<bool>();
-  if (data.is_number_float()) return data.get<double>();
-  if (data.is_string()) return data.get<std::string>();
+
+  const auto& el = *value;
+
+  if (el.is_null()) return std::nullptr_t();
+
+  // Try string first (most specific)
+  std::string_view sv;
+  if (!el.get(sv)) return std::string(sv);
+
+  // Try double (includes integers in some parsers)
+  double d = 0.0;
+  if (!el.get(d)) return d;
+
+  // Try integer
+  int64_t i = 0;
+  if (!el.get(i)) return i;
+
+  // Try bool last (least specific, as 0/1 can be bool or int)
+  bool b = false;
+  if (!el.get(b)) return b;
+
   return std::nullopt;
 }
 
 template <typename T>
 inline T MParamGL(uint32_t pname, T defaultValue, bool isWebGL2) {
-  if (auto value = MaskConfig::GetNested(
-          isWebGL2 ? "webGl2:parameters" : "webGl:parameters",
-          std::to_string(pname));
-      value.has_value()) {
-    return value.value().get<T>();
+  auto value = MaskConfig::GetNested(
+      isWebGL2 ? "webGl2:parameters" : "webGl:parameters", std::to_string(pname));
+  if (!value) return defaultValue;
+
+  if constexpr (std::is_same_v<T, bool>) {
+    bool b{};
+    if (value->get(b)) return defaultValue;
+    return b;
+  } else if constexpr (std::is_integral_v<T> && std::is_signed_v<T>) {
+    int64_t i{};
+    if (value->get(i)) return defaultValue;
+    if (i < std::numeric_limits<T>::min() || i > std::numeric_limits<T>::max())
+      return defaultValue;
+    return static_cast<T>(i);
+  } else if constexpr (std::is_integral_v<T> && std::is_unsigned_v<T>) {
+    uint64_t u{};
+    if (value->get(u)) return defaultValue;
+    if (u > std::numeric_limits<T>::max()) return defaultValue;
+    return static_cast<T>(u);
+  } else if constexpr (std::is_floating_point_v<T>) {
+    double d{};
+    if (value->get(d)) return defaultValue;
+    return static_cast<T>(d);
+  } else if constexpr (std::is_same_v<T, std::string>) {
+    std::string_view sv;
+    if (value->get(sv)) return defaultValue;
+    return std::string(sv);
+  } else {
+    return defaultValue;
   }
-  return defaultValue;
 }
 
 template <typename T>
-inline std::vector<T> MParamGLVector(uint32_t pname,
-                                     std::vector<T> defaultValue,
+inline std::vector<T> MParamGLVector(uint32_t pname, 
+                                     const std::vector<T>& defaultValue,
                                      bool isWebGL2) {
-  if (auto value = MaskConfig::GetNested(
-          isWebGL2 ? "webGl2:parameters" : "webGl:parameters",
-          std::to_string(pname));
-      value.has_value()) {
-    if (value.value().is_array()) {
-      std::array<T, 4UL> result = value.value().get<std::array<T, 4UL>>();
-      return std::vector<T>(result.begin(), result.end());
+  auto value = MaskConfig::GetNested(
+      isWebGL2 ? "webGl2:parameters" : "webGl:parameters", std::to_string(pname));
+  if (!value) return defaultValue;
+
+  simdjson::dom::array arr;
+  if (value->get(arr)) return defaultValue;
+
+  std::vector<T> out;
+  for (auto v : arr) {
+    if constexpr (std::is_integral_v<T> && std::is_signed_v<T>) {
+      int64_t i{};
+      if (v.get(i)) return defaultValue;
+      if (i < std::numeric_limits<T>::min() || i > std::numeric_limits<T>::max())
+        return defaultValue;
+      out.push_back(static_cast<T>(i));
+    } else if constexpr (std::is_integral_v<T> && std::is_unsigned_v<T>) {
+      uint64_t u{};
+      if (v.get(u)) return defaultValue;
+      if (u > std::numeric_limits<T>::max())
+        return defaultValue;
+      out.push_back(static_cast<T>(u));
+    } else if constexpr (std::is_floating_point_v<T>) {
+      double d{};
+      if (v.get(d)) return defaultValue;
+      out.push_back(static_cast<T>(d));
+    } else if constexpr (std::is_same_v<T, bool>) {
+      bool b{};
+      if (v.get(b)) return defaultValue;
+      out.push_back(b);
+    } else if constexpr (std::is_same_v<T, std::string>) {
+      std::string_view sv;
+      if (v.get(sv)) return defaultValue;
+      out.emplace_back(sv);
+    } else {
+      return defaultValue;
     }
   }
-  return defaultValue;
+  return out;
 }
 
 inline std::optional<std::array<int32_t, 3UL>> MShaderData(
     uint32_t shaderType, uint32_t precisionType, bool isWebGL2) {
   std::string valueName =
       std::to_string(shaderType) + "," + std::to_string(precisionType);
-  if (auto value =
-          MaskConfig::GetNested(isWebGL2 ? "webGl2:shaderPrecisionFormats"
-                                         : "webGl:shaderPrecisionFormats",
-                                valueName)) {
-    // Convert {rangeMin: int, rangeMax: int, precision: int} to array
-    auto data = value.value();
-    // Assert rangeMin, rangeMax, and precision are present
-    if (!data.contains("rangeMin") || !data.contains("rangeMax") ||
-        !data.contains("precision")) {
-      return std::nullopt;
-    }
-    return std::array<int32_t, 3U>{data["rangeMin"].get<int32_t>(),
-                                   data["rangeMax"].get<int32_t>(),
-                                   data["precision"].get<int32_t>()};
-  }
-  return std::nullopt;
+
+  auto value = MaskConfig::GetNested(
+      isWebGL2 ? "webGl2:shaderPrecisionFormats" : "webGl:shaderPrecisionFormats",
+      valueName);
+  if (!value) return std::nullopt;
+
+  simdjson::dom::object obj;
+  if (value->get(obj)) return std::nullopt;
+
+  simdjson::dom::element eMin, eMax, ePrec;
+  if (obj.at_key("rangeMin").get(eMin)) return std::nullopt;
+  if (obj.at_key("rangeMax").get(eMax)) return std::nullopt;
+  if (obj.at_key("precision").get(ePrec)) return std::nullopt;
+
+  int64_t rmin{}, rmax{}, prec{};
+  if (eMin.get(rmin) || eMax.get(rmax) || ePrec.get(prec)) return std::nullopt;
+
+  // Clamp to int32_t range (or reject)
+  if (rmin < std::numeric_limits<int32_t>::min() || rmin > std::numeric_limits<int32_t>::max()) return std::nullopt;
+  if (rmax < std::numeric_limits<int32_t>::min() || rmax > std::numeric_limits<int32_t>::max()) return std::nullopt;
+  if (prec < std::numeric_limits<int32_t>::min() || prec > std::numeric_limits<int32_t>::max()) return std::nullopt;
+
+  return std::array<int32_t, 3UL>{
+      static_cast<int32_t>(rmin), static_cast<int32_t>(rmax),
+      static_cast<int32_t>(prec)};
 }
 
 inline std::optional<
     std::vector<std::tuple<std::string, std::string, std::string, bool, bool>>>
 MVoices() {
-  auto data = GetJson();
-  if (!data.contains("voices") || !data["voices"].is_array()) {
-    return std::nullopt;
+  const auto& root = GetJson();
+
+  simdjson::dom::object rootObj;
+  if (root.get(rootObj)) return std::nullopt;
+
+  simdjson::dom::element voicesEl;
+  if (rootObj.at_key("voices").get(voicesEl)) return std::nullopt;
+
+  simdjson::dom::array voicesArr;
+  if (voicesEl.get(voicesArr)) return std::nullopt;
+
+  std::vector<std::tuple<std::string, std::string, std::string, bool, bool>> voices;
+  voices.reserve(voicesArr.size());
+
+  for (auto voiceEl : voicesArr) {
+    simdjson::dom::object vObj;
+    if (voiceEl.get(vObj)) continue;
+
+    simdjson::dom::element langEl, nameEl, uriEl, defEl, localEl;
+    if (vObj.at_key("lang").get(langEl)) continue;
+    if (vObj.at_key("name").get(nameEl)) continue;
+    if (vObj.at_key("voiceUri").get(uriEl)) continue;
+    if (vObj.at_key("isDefault").get(defEl)) continue;
+    if (vObj.at_key("isLocalService").get(localEl)) continue;
+
+    std::string_view lang, name, uri;
+    bool isDefault = false, isLocal = false;
+
+    if (langEl.get(lang) || nameEl.get(name) || uriEl.get(uri)) continue;
+    if (defEl.get(isDefault) || localEl.get(isLocal)) continue;
+
+    voices.emplace_back(std::string(lang), std::string(name), std::string(uri),
+                        isDefault, isLocal);
   }
 
-  std::vector<std::tuple<std::string, std::string, std::string, bool, bool>>
-      voices;
-  for (const auto& voice : data["voices"]) {
-    // Check if voice has all required fields
-    if (!voice.contains("lang") || !voice.contains("name") ||
-        !voice.contains("voiceUri") || !voice.contains("isDefault") ||
-        !voice.contains("isLocalService")) {
-      continue;
-    }
-
-    voices.emplace_back(
-        voice["lang"].get<std::string>(), voice["name"].get<std::string>(),
-        voice["voiceUri"].get<std::string>(), voice["isDefault"].get<bool>(),
-        voice["isLocalService"].get<bool>());
-  }
   return voices;
 }
 
