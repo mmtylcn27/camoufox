@@ -1,0 +1,534 @@
+diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderingContext2D.cpp
+index c9ca495325c8..94f8a476fe4f 100644
+--- a/dom/canvas/CanvasRenderingContext2D.cpp
++++ b/dom/canvas/CanvasRenderingContext2D.cpp
+@@ -4,7 +4,7 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "CanvasRenderingContext2D.h"
+-
++#include "MaskConfig.hpp"
+ #include "mozilla/gfx/Helpers.h"
+ #include "nsCSSValue.h"
+ #include "nsXULElement.h"
+@@ -134,6 +134,7 @@
+ #include "mozilla/layers/WebRenderCanvasRenderer.h"
+ #include "WindowRenderer.h"
+ #include "GeckoBindings.h"
++#include <random>
+ 
+ #undef free  // apparently defined by some windows header, clashing with a
+              // free() method in SkTypes.h
+@@ -154,6 +155,53 @@ using namespace mozilla::ipc;
+ using namespace mozilla::layers;
+ 
+ namespace mozilla::dom {
++// --------------------------------------
++static uint32_t sCanvasNoiseSeed = 0;
++static bool sCanvasNoiseSeedInitialized = false;
++
++static uint32_t GetCanvasNoiseSeed() {
++    if (!sCanvasNoiseSeedInitialized) {
++      if (auto value = MaskConfig::GetUint32("canvas:noiseSeed")) {
++        sCanvasNoiseSeed = value.value();
++      }
++      else {
++        std::random_device rd;
++        sCanvasNoiseSeed = rd();
++      }
++      sCanvasNoiseSeedInitialized = true;
++    }
++    return sCanvasNoiseSeed;
++}
++
++static void ApplyCanvasNoise(uint8_t* aData, uint32_t aWidth, uint32_t aHeight) {
++    if (!aData)
++        return;
++
++    uint32_t length = aWidth * aHeight * 4; // RGBA
++
++    for (uint32_t i = 0; i < length; i += 4) {
++        uint32_t h = GetCanvasNoiseSeed() ^ i;
++        h = h * 0x45d9f3b + 0x119de1f3;
++        h = (h >> 16) ^ h;
++
++        if ((h % 5000) > 10)
++            continue;
++
++        for (int j = 0; j < 3; j++) {
++            uint8_t val = aData[i + j];
++
++            if (val > 10 && val < 245) {
++                uint32_t chHash = h ^ (j * 0x12345678);
++                chHash = chHash * 0x45d9f3b + 0x119de1f3;
++                
++                int noise = (int)(chHash % 3) - 1; // -1, 0, +1
++                aData[i + j] = (uint8_t)(val + noise);
++            }
++        }
++    }
++}
++// --------------------------------------
++
+ 
+ // Cap sigma to avoid overly large temp surfaces.
+ const Float SIGMA_MAX = 100;
+@@ -2285,6 +2333,9 @@ UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
+       *out_format = imgIEncoder::INPUT_FORMAT_HOSTARGB;
+       *out_imageSize = data->GetSize();
+       ret = SurfaceToPackedBGRA(data);
++
++      if (ret)
++          ApplyCanvasNoise(ret.get(), out_imageSize->width, out_imageSize->height);
+     }
+   }
+ 
+@@ -6586,6 +6637,8 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
+                         aWidth * 4, SurfaceFormat::R8G8B8A8,
+                         dstWriteRect.Size());
+     }
++
++    ApplyCanvasNoise(dst, dstWriteRect.width, dstWriteRect.height);
+   } while (false);
+ 
+   readback->Unmap();
+diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.cpp
+index e254ebffd530..ee0afcca5f67 100644
+--- a/dom/canvas/ClientWebGLContext.cpp
++++ b/dom/canvas/ClientWebGLContext.cpp
+@@ -45,8 +45,65 @@
+ #include "WebGLChild.h"
+ #include "WebGLTextureUpload.h"
+ #include "WebGLValidateStrings.h"
++#include <random>
+ 
+ namespace mozilla {
++// --------------------------------------
++static uint32_t sWebGLNoiseSeed = 0;
++static bool sWebGLNoiseSeedInitialized = false;
++
++static uint32_t GetWebGLNoiseSeed() {
++    if (!sWebGLNoiseSeedInitialized) {
++      if (auto value = MaskConfig::GetUint32("webGl:noiseSeed")) {
++        sWebGLNoiseSeed = value.value();
++      }
++      else {
++        std::random_device rd;
++        sWebGLNoiseSeed = rd();
++      }
++      sWebGLNoiseSeedInitialized = true;
++    }
++    return sWebGLNoiseSeed;
++}
++
++static void ApplyWebGLNoise(Span<uint8_t> aData, uint32_t aWidth, uint32_t aHeight, GLenum format, GLenum type) {
++    if (type != LOCAL_GL_UNSIGNED_BYTE)
++        return;
++
++    int channels = 0;
++    if (format == LOCAL_GL_RGBA)
++        channels = 4;
++    else if (format == LOCAL_GL_RGB)
++        channels = 3;
++    else
++        return;
++
++    size_t length = aData.size();
++    
++    for (size_t i = 0; i < length; i += channels) {
++        if (i + 3 > length) break; 
++
++        uint32_t h = GetWebGLNoiseSeed() ^ (uint32_t)i;
++        h = h * 0x45d9f3b + 0x119de1f3;
++        h = (h >> 16) ^ h;
++
++        if ((h % 5000) > 10)
++            continue;
++
++        for (int j = 0; j < 3; j++) { // RGB only
++             uint8_t val = aData[i + j];
++
++             if (val > 10 && val < 245) {
++                 uint32_t chHash = h ^ (j * 0x12345678);
++                 chHash = chHash * 0x45d9f3b + 0x119de1f3;
++
++                 int noise = (int)(chHash % 3) - 1;
++                 aData[i + j] = (uint8_t)(val + noise);
++             }
++        }
++    }
++}
++// --------------------------------------------
+ 
+ namespace webgl {
+ std::string SanitizeRenderer(const std::string&);
+@@ -5405,6 +5462,7 @@ bool ClientWebGLContext::DoReadPixels(const webgl::ReadPixelsDesc& desc,
+   const auto& inProcess = notLost->inProcess;
+   if (inProcess) {
+     inProcess->ReadPixelsInto(desc, dest);
++    ApplyWebGLNoise(dest, desc.size.x, desc.size.y, desc.pi.format, desc.pi.type);
+     return true;
+   }
+   const auto& child = notLost->outOfProcess;
+@@ -5448,6 +5506,7 @@ bool ClientWebGLContext::DoReadPixels(const webgl::ReadPixelsDesc& desc,
+     Memcpy(&destRow, srcRow);
+   }
+ 
++  ApplyWebGLNoise(dest, desc.size.x, desc.size.y, desc.pi.format, desc.pi.type);
+   return true;
+ }
+ 
+diff --git a/dom/media/webaudio/AnalyserNode.cpp b/dom/media/webaudio/AnalyserNode.cpp
+index d8b547477e55..89287611b80d 100644
+--- a/dom/media/webaudio/AnalyserNode.cpp
++++ b/dom/media/webaudio/AnalyserNode.cpp
+@@ -12,9 +12,68 @@
+ #include "mozilla/PodOperations.h"
+ #include "nsMathUtils.h"
+ #include "Tracing.h"
++#include "MaskConfig.hpp"
++#include <random>
+ 
+ namespace mozilla {
+ 
++// Use shared AudioContext noise seed
++static uint32_t sAudioNoiseSeed = 0;
++static bool sAudioNoiseSeedInitialized = false;
++
++static uint32_t GetAudioNoiseSeed() {
++    if (!sAudioNoiseSeedInitialized) {
++        if (auto value = MaskConfig::GetUint32("audioContext:noiseSeed")) {
++            sAudioNoiseSeed = value.value();
++        } else {
++            std::random_device rd;
++            sAudioNoiseSeed = rd();
++        }
++        sAudioNoiseSeedInitialized = true;
++    }
++    return sAudioNoiseSeed;
++}
++
++static void ApplyAnalyserNoise(float* aData, size_t aLength, uint32_t aType) {
++    if (!aData || aLength == 0) return;
++
++    uint32_t seed = GetAudioNoiseSeed() ^ aType;
++    
++    for (uint32_t i = 0; i < aLength; ++i) {
++        uint32_t h = seed ^ i;
++        h = h * 0x45d9f3b + 0x119de1f3;
++        h = (h >> 16) ^ h;
++        
++        if ((h % 5000) > 10)
++            continue;
++            
++        float noiseHash = (float)(h & 0xFFFF) / 65535.0f;
++        float noise = (noiseHash - 0.5f) * 2.0e-6f;
++        aData[i] += noise;
++    }
++}
++
++static void ApplyAnalyserNoiseUint8(uint8_t* aData, size_t aLength, uint32_t aType) {
++    if (!aData || aLength == 0) return;
++
++    uint32_t seed = GetAudioNoiseSeed() ^ aType ^ 0x1000;
++    
++    for (uint32_t i = 0; i < aLength; ++i) {
++        uint32_t h = seed ^ i;
++        h = h * 0x45d9f3b + 0x119de1f3;
++        h = (h >> 16) ^ h;
++        
++        if ((h % 5000) > 10)
++            continue;
++            
++        uint8_t val = aData[i];
++        if (val > 1 && val < 254) {
++            int noise = (int)(h % 3) - 1; // -1, 0, +1
++            aData[i] = (uint8_t)(val + noise);
++        }
++    }
++}
++
+ static const uint32_t MAX_FFT_SIZE = 32768;
+ static const size_t CHUNK_COUNT = MAX_FFT_SIZE >> WEBAUDIO_BLOCK_SIZE_BITS;
+ static_assert(MAX_FFT_SIZE == CHUNK_COUNT * WEBAUDIO_BLOCK_SIZE,
+@@ -222,6 +281,8 @@ void AnalyserNode::GetFloatFrequencyData(const Float32Array& aArray) {
+       aData[i] = WebAudioUtils::ConvertLinearToDecibels(
+           mOutputBuffer[i], -std::numeric_limits<float>::infinity());
+     }
++    
++    ApplyAnalyserNoise(aData.Elements(), length, 1);
+   });
+ }
+ 
+@@ -246,6 +307,8 @@ void AnalyserNode::GetByteFrequencyData(const Uint8Array& aArray) {
+                    UCHAR_MAX * (decibels - mMinDecibels) * rangeScaleFactor));
+       aData[i] = static_cast<unsigned char>(scaled);
+     }
++    
++    ApplyAnalyserNoiseUint8(aData.Elements(), length, 2);
+   });
+ }
+ 
+@@ -254,6 +317,7 @@ void AnalyserNode::GetFloatTimeDomainData(const Float32Array& aArray) {
+     size_t length = std::min(aData.Length(), size_t(FftSize()));
+ 
+     GetTimeDomainData(aData.Elements(), length);
++    ApplyAnalyserNoise(aData.Elements(), length, 3);
+   });
+ }
+ 
+@@ -276,6 +340,8 @@ void AnalyserNode::GetByteTimeDomainData(const Uint8Array& aArray) {
+           std::max(0.0f, std::min(float(UCHAR_MAX), 128.0f * (value + 1.0f)));
+       buffer[i] = static_cast<unsigned char>(scaled);
+     }
++    
++    ApplyAnalyserNoiseUint8(buffer, length, 4);
+   });
+ }
+ 
+diff --git a/dom/media/webaudio/AudioBuffer.cpp b/dom/media/webaudio/AudioBuffer.cpp
+index 8c2a36fe457c..af3ab2d01f36 100644
+--- a/dom/media/webaudio/AudioBuffer.cpp
++++ b/dom/media/webaudio/AudioBuffer.cpp
+@@ -5,6 +5,7 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "AudioBuffer.h"
++#include "MaskConfig.hpp"
+ #include "mozilla/dom/AudioBufferBinding.h"
+ #include "jsfriendapi.h"
+ #include "js/ArrayBuffer.h"             // JS::StealArrayBufferContents
+@@ -20,8 +21,48 @@
+ #include "nsPrintfCString.h"
+ #include "nsTHashSet.h"
+ #include <numeric>
++#include <random>
+ 
+ namespace mozilla::dom {
++// --------------------------------------------
++static uint32_t sAudioNoiseSeed = 0;
++static bool sAudioNoiseSeedInitialized = false;
++
++static uint32_t GetAudioNoiseSeed() {
++    if (!sAudioNoiseSeedInitialized) {
++      if (auto value = MaskConfig::GetUint32("audioContext:noiseSeed")) {
++        sAudioNoiseSeed = value.value();
++      }
++      else {
++        std::random_device rd;
++        sAudioNoiseSeed = rd();
++      }
++      sAudioNoiseSeedInitialized = true;
++    }
++    return sAudioNoiseSeed;
++}
++
++static void ApplyAudioNoise(float* aData, uint32_t aLength, uint32_t aChannelIndex, uint32_t aOffset = 0) {
++    if (!aData || aLength < 100)
++        return;
++
++    uint32_t seed = GetAudioNoiseSeed() ^ aChannelIndex;
++    
++    for (uint32_t i = 0; i < aLength; ++i) {
++        uint32_t realPos = aOffset + i;
++        uint32_t h = seed ^ realPos;
++        h = h * 0x45d9f3b + 0x119de1f3;
++        h = (h >> 16) ^ h;
++
++        if ((h % 1000) > 1)
++            continue;
++            
++        float noiseHash = (float)(h & 0xFFFF) / 65535.0f;
++        float noise = (noiseHash - 0.5f) * 1.0e-6f;
++        aData[i] += noise;
++    }
++}
++// --------------------------------------------
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(AudioBuffer)
+ 
+@@ -301,6 +342,8 @@ bool AudioBuffer::RestoreJSChannelData(JSContext* aJSContext) {
+       float* jsData = JS_GetFloat32ArrayData(array, &isShared, nogc);
+       MOZ_ASSERT(!isShared);  // Was created as unshared above
+       CopyChannelDataToFloat(mSharedChannels, i, 0, jsData, Length());
++
++      ApplyAudioNoise(jsData, Length(), i);
+     }
+     mJSChannels[i] = array;
+   }
+@@ -342,8 +385,9 @@ void AudioBuffer::CopyFromChannel(const Float32Array& aDestination,
+     MOZ_ASSERT(!isShared);
+     aDestination.ProcessData(
+         [&](const Span<float>& aData, JS::AutoCheckCannotGC&&) {
+-          PodMove(aData.Elements(), sourceData + aBufferOffset,
+-                  calculateCount(aData.Length()));
++          uint32_t count = calculateCount(aData.Length());
++          PodMove(aData.Elements(), sourceData + aBufferOffset, count);
++          // Gürültü zaten JS array'de var, tekrar ekleme
+         });
+     return;
+   }
+@@ -351,8 +395,10 @@ void AudioBuffer::CopyFromChannel(const Float32Array& aDestination,
+   if (!mSharedChannels.IsNull()) {
+     aDestination.ProcessData([&](const Span<float>& aData,
+                                  JS::AutoCheckCannotGC&&) {
++      uint32_t count = calculateCount(aData.Length());
+       CopyChannelDataToFloat(mSharedChannels, aChannelNumber, aBufferOffset,
+-                             aData.Elements(), calculateCount(aData.Length()));
++                             aData.Elements(), count);
++      ApplyAudioNoise(aData.Elements(), count, aChannelNumber, aBufferOffset);
+     });
+     return;
+   }
+diff --git a/dom/media/webaudio/DynamicsCompressorNode.cpp b/dom/media/webaudio/DynamicsCompressorNode.cpp
+index 7ec27d9495b0..08c382b8e066 100644
+--- a/dom/media/webaudio/DynamicsCompressorNode.cpp
++++ b/dom/media/webaudio/DynamicsCompressorNode.cpp
+@@ -12,11 +12,69 @@
+ #include "WebAudioUtils.h"
+ #include "blink/DynamicsCompressor.h"
+ #include "Tracing.h"
++#include "MaskConfig.hpp"
++#include <random>
+ 
+ using WebCore::DynamicsCompressor;
+ 
+ namespace mozilla::dom {
+ 
++// Shared AudioContext noise seed
++static uint32_t sAudioNoiseSeed = 0;
++static bool sAudioNoiseSeedInitialized = false;
++
++static uint32_t GetAudioNoiseSeed() {
++    if (!sAudioNoiseSeedInitialized) {
++        if (auto value = MaskConfig::GetUint32("audioContext:noiseSeed")) {
++            sAudioNoiseSeed = value.value();
++        } else {
++            std::random_device rd;
++            sAudioNoiseSeed = rd();
++        }
++        sAudioNoiseSeedInitialized = true;
++    }
++    return sAudioNoiseSeed;
++}
++
++static float ApplyReductionNoise(float aReduction) {
++    uint32_t h = GetAudioNoiseSeed() ^ 0x12ED;
++
++    uint32_t reductionBits;
++    memcpy(&reductionBits, &aReduction, sizeof(float));
++    h ^= reductionBits;
++    h = h * 0x45d9f3b + 0x119de1f3;
++    h = (h >> 16) ^ h;
++
++    float noiseHash = (float)(h & 0xFFFF) / 65535.0f;
++    float noise = (noiseHash - 0.5f) * 0.001f;
++    return aReduction + noise;
++}
++
++static void ApplyCompressorNoise(AudioBlock* aOutput, uint32_t aChannelCount) {
++    if (!aOutput || aChannelCount == 0) return;
++
++    uint32_t seed = GetAudioNoiseSeed() ^ 0xC04F;
++    
++    for (uint32_t ch = 0; ch < aChannelCount; ++ch) {
++        float* channelData = aOutput->ChannelFloatsForWrite(ch);
++        uint32_t chSeed = seed ^ ch;
++        
++        for (uint32_t i = 0; i < WEBAUDIO_BLOCK_SIZE; ++i) {
++            // Canvas/WebGL gibi basit pozisyon hash
++            uint32_t h = chSeed ^ i;
++            h = h * 0x45d9f3b + 0x119de1f3;
++            h = (h >> 16) ^ h;
++            
++            if ((h % 10000) > 10)
++                continue;
++                
++            float noiseHash = (float)(h & 0xFFFF) / 65535.0f;
++            float noise = (noiseHash - 0.5f) * 1.0e-6f;
++            channelData[i] += noise;
++        }
++    }
++}
++
+ NS_IMPL_CYCLE_COLLECTION_INHERITED(DynamicsCompressorNode, AudioNode,
+                                    mThreshold, mKnee, mRatio, mAttack, mRelease)
+ 
+@@ -100,10 +158,12 @@ class DynamicsCompressorNodeEngine final : public AudioNodeEngine {
+ 
+     aOutput->AllocateChannels(channelCount);
+     mCompressor->process(&aInput, aOutput, aInput.GetDuration());
++    
++    // Apply noise to compressor output
++    ApplyCompressorNoise(aOutput, channelCount);
+ 
+-    SendReductionParamToMainThread(
+-        aTrack,
+-        mCompressor->parameterValue(DynamicsCompressor::ParamReduction));
++    float reduction = mCompressor->parameterValue(DynamicsCompressor::ParamReduction);
++    SendReductionParamToMainThread(aTrack, ApplyReductionNoise(reduction));
+   }
+ 
+   size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override {
+diff --git a/dom/media/webaudio/OscillatorNode.cpp b/dom/media/webaudio/OscillatorNode.cpp
+index 65a928f126ab..242568b7a76d 100644
+--- a/dom/media/webaudio/OscillatorNode.cpp
++++ b/dom/media/webaudio/OscillatorNode.cpp
+@@ -12,9 +12,47 @@
+ #include "WebAudioUtils.h"
+ #include "blink/PeriodicWave.h"
+ #include "Tracing.h"
++#include "MaskConfig.hpp"
++#include <random>
+ 
+ namespace mozilla::dom {
+ 
++// Shared AudioContext noise seed
++static uint32_t sAudioNoiseSeed = 0;
++static bool sAudioNoiseSeedInitialized = false;
++
++static uint32_t GetAudioNoiseSeed() {
++    if (!sAudioNoiseSeedInitialized) {
++        if (auto value = MaskConfig::GetUint32("audioContext:noiseSeed")) {
++            sAudioNoiseSeed = value.value();
++        } else {
++            std::random_device rd;
++            sAudioNoiseSeed = rd();
++        }
++        sAudioNoiseSeedInitialized = true;
++    }
++    return sAudioNoiseSeed;
++}
++
++static void ApplyOscillatorNoise(float* aData, uint32_t aLength) {
++    if (!aData || aLength == 0) return;
++
++    uint32_t seed = GetAudioNoiseSeed() ^ 0x05C1;
++    
++    for (uint32_t i = 0; i < aLength; ++i) {
++        uint32_t h = seed ^ i;
++        h = h * 0x45d9f3b + 0x119de1f3;
++        h = (h >> 16) ^ h;
++        
++        if ((h % 10000) > 10)
++            continue;
++            
++        float noiseHash = (float)(h & 0xFFFF) / 65535.0f;
++        float noise = (noiseHash - 0.5f) * 1.0e-6f;
++        aData[i] += noise;
++    }
++}
++
+ NS_IMPL_CYCLE_COLLECTION_INHERITED(OscillatorNode, AudioScheduledSourceNode,
+                                    mPeriodicWave, mFrequency, mDetune)
+ 
+@@ -332,6 +370,9 @@ class OscillatorNodeEngine final : public AudioNodeEngine {
+           // Avoid `default:` so that `-Wswitch` catches missing enumerators at
+           // compile time.
+       };
++      
++      // Apply noise to oscillator output
++      ApplyOscillatorNoise(output, WEBAUDIO_BLOCK_SIZE);
+     }
+ 
+     if (ticks + WEBAUDIO_BLOCK_SIZE >= mStop) {
