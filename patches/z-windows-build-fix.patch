@@ -1,0 +1,15 @@
+diff --git a/third_party/libwebrtc/modules/video_capture/video_capture.h b/third_party/libwebrtc/modules/video_capture/video_capture.h
+index 8a91ca2f8391..bc630f964d14 100644
+--- a/third_party/libwebrtc/modules/video_capture/video_capture.h
++++ b/third_party/libwebrtc/modules/video_capture/video_capture.h
+@@ -27,6 +27,10 @@
+ #include <jni.h>
+ #endif
+ 
++#ifdef XP_WIN
++typedef int pid_t;
++#endif
++
+ namespace webrtc {
+ 
+ class VideoInputFeedBack
