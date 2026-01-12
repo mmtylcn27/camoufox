@@ -10,18 +10,19 @@ index 37f9b0f8bed5..ac02abec0fc0 100644
 +# DOM Mask
 +LOCAL_INCLUDES += ["/camoucfg"]
 diff --git a/dom/base/Element.cpp b/dom/base/Element.cpp
-index 41f2c47132d5..b64ff60526c9 100644
+index 101590d8c8..f004930b20 100644
 --- a/dom/base/Element.cpp
 +++ b/dom/base/Element.cpp
-@@ -12,6 +12,7 @@
+@@ -12,6 +12,8 @@
  
  #include "mozilla/dom/Element.h"
- #include "mozilla/dom/ElementInlines.h"
+ 
 +#include "MaskConfig.hpp"
++
+ #include <inttypes.h>
  
  #include <cstddef>
- #include <inttypes.h>
-@@ -1019,6 +1020,18 @@ nsRect Element::GetClientAreaRect() {
+@@ -1006,6 +1008,18 @@ nsRect Element::GetClientAreaRect() {
    Document* doc = OwnerDoc();
    nsPresContext* presContext = doc->GetPresContext();
  
@@ -40,196 +41,11 @@ index 41f2c47132d5..b64ff60526c9 100644
    // We can avoid a layout flush if this is the scrolling element of the
    // document, we have overlay scrollbars, and we aren't embedded in another
    // document
-diff --git a/dom/base/Navigator.cpp b/dom/base/Navigator.cpp
-index eae428a32116..b44b35f60bca 100644
---- a/dom/base/Navigator.cpp
-+++ b/dom/base/Navigator.cpp
-@@ -8,6 +8,7 @@
- #include "base/basictypes.h"
- 
- #include "Navigator.h"
-+#include "MaskConfig.hpp"
- #include "nsIXULAppInfo.h"
- #include "nsPluginArray.h"
- #include "nsMimeTypeArray.h"
-@@ -270,6 +271,8 @@ void Navigator::Invalidate() {
- 
- void Navigator::GetUserAgent(nsAString& aUserAgent, CallerType aCallerType,
-                              ErrorResult& aRv) const {
-+  if (auto value = MaskConfig::GetString("navigator.userAgent"))
-+    return aUserAgent.Assign(NS_ConvertUTF8toUTF16(value.value()));
-   nsCOMPtr<nsPIDOMWindowInner> window;
- 
-   if (mWindow) {
-@@ -296,6 +299,8 @@ void Navigator::GetUserAgent(nsAString& aUserAgent, CallerType aCallerType,
- }
- 
- void Navigator::GetAppCodeName(nsAString& aAppCodeName, ErrorResult& aRv) {
-+  if (auto value = MaskConfig::GetString("navigator.appCodeName"))
-+    return aAppCodeName.Assign(NS_ConvertUTF8toUTF16(value.value()));
-   nsresult rv;
- 
-   nsCOMPtr<nsIHttpProtocolHandler> service(
-@@ -317,6 +322,8 @@ void Navigator::GetAppCodeName(nsAString& aAppCodeName, ErrorResult& aRv) {
- 
- void Navigator::GetAppVersion(nsAString& aAppVersion, CallerType aCallerType,
-                               ErrorResult& aRv) const {
-+  if (auto value = MaskConfig::GetString("navigator.appVersion"))
-+    return aAppVersion.Assign(NS_ConvertUTF8toUTF16(value.value()));
-   nsCOMPtr<Document> doc = mWindow->GetExtantDoc();
- 
-   nsresult rv = GetAppVersion(
-@@ -328,6 +335,8 @@ void Navigator::GetAppVersion(nsAString& aAppVersion, CallerType aCallerType,
- }
- 
- void Navigator::GetAppName(nsAString& aAppName) const {
-+  if (auto value = MaskConfig::GetString("navigator.appName"))
-+    return aAppName.Assign(NS_ConvertUTF8toUTF16(value.value()));
-   aAppName.AssignLiteral("Netscape");
- }
- 
-@@ -352,6 +361,15 @@ void Navigator::GetAcceptLanguages(const nsString* aLanguageOverride, nsTArray<n
- 
-   aLanguages.Clear();
- 
-+  if (std::vector<std::string> maskValues =
-+          MaskConfig::GetStringList("navigator.languages");
-+      !maskValues.empty()) {
-+    for (const auto& lang : maskValues) {
-+      aLanguages.AppendElement(NS_ConvertUTF8toUTF16(lang));
-+    }
-+    return;
-+  }
-+
-   // E.g. "de-de, en-us,en".
-   nsAutoString acceptLang;
-   if (aLanguageOverride && aLanguageOverride->Length())
-@@ -403,6 +421,8 @@ void Navigator::GetAcceptLanguages(const nsString* aLanguageOverride, nsTArray<n
-  * Full details above in GetAcceptLanguages.
-  */
- void Navigator::GetLanguage(nsAString& aLanguage) {
-+  if (auto value = MaskConfig::GetString("navigator.language"))
-+    return aLanguage.Assign(NS_ConvertUTF8toUTF16(value.value()));
-   nsTArray<nsString> languages;
-   GetLanguages(languages);
-   MOZ_ASSERT(languages.Length() >= 1);
-@@ -426,6 +446,8 @@ void Navigator::GetLanguages(nsTArray<nsString>& aLanguages) {
- 
- void Navigator::GetPlatform(nsAString& aPlatform, CallerType aCallerType,
-                             ErrorResult& aRv) const {
-+  if (auto value = MaskConfig::GetString("navigator.platform"))
-+    return aPlatform.Assign(NS_ConvertUTF8toUTF16(value.value()));
-   if (mWindow) {
-     BrowsingContext* bc = mWindow->GetBrowsingContext();
-     nsString customPlatform;
-@@ -452,6 +474,8 @@ void Navigator::GetPlatform(nsAString& aPlatform, CallerType aCallerType,
- void Navigator::GetOscpu(nsAString& aOSCPU, CallerType aCallerType,
-                          ErrorResult& aRv) const {
-   if (aCallerType != CallerType::System) {
-+    if (auto value = MaskConfig::GetString("navigator.oscpu"))
-+      return aOSCPU.Assign(NS_ConvertUTF8toUTF16(value.value()));
-     // If fingerprinting resistance is on, we will spoof this value. See
-     // nsRFPService.h for details about spoofed values.
-     if (nsContentUtils::ShouldResistFingerprinting(GetDocShell(),
-@@ -491,10 +515,14 @@ void Navigator::GetVendor(nsAString& aVendor) { aVendor.Truncate(); }
- void Navigator::GetVendorSub(nsAString& aVendorSub) { aVendorSub.Truncate(); }
- 
- void Navigator::GetProduct(nsAString& aProduct) {
-+  if (auto value = MaskConfig::GetString("navigator.product"))
-+    return aProduct.Assign(NS_ConvertUTF8toUTF16(value.value()));
-   aProduct.AssignLiteral("Gecko");
- }
- 
- void Navigator::GetProductSub(nsAString& aProductSub) {
-+  if (auto value = MaskConfig::GetString("navigator.productSub"))
-+    return aProductSub.Assign(NS_ConvertUTF8toUTF16(value.value()));
-   // Legacy build date hardcoded for backward compatibility (bug 776376)
-   aProductSub.AssignLiteral(LEGACY_UA_GECKO_TRAIL);
- }
-@@ -520,7 +548,11 @@ nsPluginArray* Navigator::GetPlugins(ErrorResult& aRv) {
-   return mPlugins;
- }
- 
--bool Navigator::PdfViewerEnabled() { return !StaticPrefs::pdfjs_disabled(); }
-+bool Navigator::PdfViewerEnabled() {
-+  if (auto value = MaskConfig::GetBool("pdfViewerEnabled"); value.has_value())
-+    return value.value();
-+  return !StaticPrefs::pdfjs_disabled();
-+}
- 
- Permissions* Navigator::GetPermissions(ErrorResult& aRv) {
-   if (!mWindow) {
-@@ -546,6 +578,9 @@ StorageManager* Navigator::Storage() {
- }
- 
- bool Navigator::CookieEnabled() {
-+  if (auto value = MaskConfig::GetBool("navigator.cookieEnabled");
-+      value.has_value())
-+    return value.value();
-   // Check whether an exception overrides the global cookie behavior
-   // Note that the code for getting the URI here matches that in
-   // nsHTMLDocument::SetCookie.
-@@ -592,6 +627,9 @@ bool Navigator::CookieEnabled() {
- }
- 
- bool Navigator::OnLine() {
-+  if (auto value = MaskConfig::GetBool("navigator.onLine"); value.has_value())
-+    return value.value();
-+  
-   if (nsContentUtils::ShouldResistFingerprinting(
-           GetDocShell(), RFPTarget::NetworkConnection)) {
-     return true;
-@@ -611,6 +649,8 @@ bool Navigator::OnLine() {
- void Navigator::GetBuildID(nsAString& aBuildID, CallerType aCallerType,
-                            ErrorResult& aRv) const {
-   if (aCallerType != CallerType::System) {
-+    if (auto value = MaskConfig::GetString("navigator.buildID"))
-+      return aBuildID.Assign(NS_ConvertUTF8toUTF16(value.value()));
-     // If fingerprinting resistance is on, we will spoof this value. See
-     // nsRFPService.h for details about spoofed values.
-     if (nsContentUtils::ShouldResistFingerprinting(
-@@ -667,6 +707,8 @@ void Navigator::GetBuildID(nsAString& aBuildID, CallerType aCallerType,
- }
- 
- void Navigator::GetDoNotTrack(nsAString& aResult) {
-+  if (auto value = MaskConfig::GetString("navigator.doNotTrack"))
-+    return aResult.Assign(NS_ConvertUTF8toUTF16(value.value()));
-   if (StaticPrefs::privacy_donottrackheader_enabled()) {
-     aResult.AssignLiteral("1");
-   } else {
-@@ -675,6 +717,9 @@ void Navigator::GetDoNotTrack(nsAString& aResult) {
- }
- 
- bool Navigator::GlobalPrivacyControl() {
-+  if (auto value = MaskConfig::GetBool("navigator.globalPrivacyControl");
-+      value.has_value())
-+    return value.value();
-   bool gpcStatus = StaticPrefs::privacy_globalprivacycontrol_enabled();
-   if (!gpcStatus) {
-     nsCOMPtr<nsILoadContext> loadContext = do_GetInterface(mWindow);
-@@ -686,6 +731,8 @@ bool Navigator::GlobalPrivacyControl() {
- }
- 
- uint64_t Navigator::HardwareConcurrency() {
-+  if (auto value = MaskConfig::GetUint64("navigator.hardwareConcurrency"))
-+    return value.value();
-   workerinternals::RuntimeService* rts =
-       workerinternals::RuntimeService::GetOrCreateService();
-   if (!rts) {
-@@ -884,6 +931,8 @@ bool Navigator::Vibrate(const nsTArray<uint32_t>& aPattern) {
- //*****************************************************************************
- 
- uint32_t Navigator::MaxTouchPoints(CallerType aCallerType) {
-+  if (auto value = MaskConfig::GetUint32("navigator.maxTouchPoints"))
-+    return value.value();
-   nsIDocShell* docshell = GetDocShell();
-   BrowsingContext* bc = docshell ? docshell->GetBrowsingContext() : nullptr;
- 
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index fe339cc40bdd..0598d58bfba3 100644
+index cd9090cda3..37a053579e 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -650,3 +650,6 @@ GeneratedFile(
+@@ -634,3 +634,6 @@ GeneratedFile(
          "/servo/components/style/properties/counted_unknown_properties.py",
      ],
  )
@@ -238,7 +54,7 @@ index fe339cc40bdd..0598d58bfba3 100644
 +LOCAL_INCLUDES += ["/camoucfg"]
 \ No newline at end of file
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
-index 5f7f1c441019..a5592451e268 100644
+index 330a707789..241f87780b 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
 +++ b/dom/base/nsGlobalWindowInner.cpp
 @@ -5,6 +5,7 @@
@@ -249,7 +65,7 @@ index 5f7f1c441019..a5592451e268 100644
  
  #include <inttypes.h>
  #include <stdio.h>
-@@ -3445,6 +3446,8 @@ void nsGlobalWindowInner::SetName(const nsAString& aName,
+@@ -3439,6 +3440,8 @@ void nsGlobalWindowInner::SetName(const nsAString& aName,
  }
  
  double nsGlobalWindowInner::GetInnerWidth(ErrorResult& aError) {
@@ -258,7 +74,7 @@ index 5f7f1c441019..a5592451e268 100644
    FORWARD_TO_OUTER_OR_THROW(GetInnerWidthOuter, (aError), aError, 0);
  }
  
-@@ -3456,6 +3459,8 @@ nsresult nsGlobalWindowInner::GetInnerWidth(double* aWidth) {
+@@ -3450,6 +3453,8 @@ nsresult nsGlobalWindowInner::GetInnerWidth(double* aWidth) {
  }
  
  double nsGlobalWindowInner::GetInnerHeight(ErrorResult& aError) {
@@ -267,7 +83,7 @@ index 5f7f1c441019..a5592451e268 100644
    // We ignore aCallerType; we only have that argument because some other things
    // called by GetReplaceableWindowCoord need it.  If this ever changes, fix
    //   nsresult nsGlobalWindowInner::GetInnerHeight(double* aInnerWidth)
-@@ -3472,12 +3477,16 @@ nsresult nsGlobalWindowInner::GetInnerHeight(double* aHeight) {
+@@ -3466,12 +3471,16 @@ nsresult nsGlobalWindowInner::GetInnerHeight(double* aHeight) {
  
  int32_t nsGlobalWindowInner::GetOuterWidth(CallerType aCallerType,
                                             ErrorResult& aError) {
@@ -284,7 +100,7 @@ index 5f7f1c441019..a5592451e268 100644
    FORWARD_TO_OUTER_OR_THROW(GetOuterHeightOuter, (aCallerType, aError), aError,
                              0);
  }
-@@ -3492,11 +3501,13 @@ double nsGlobalWindowInner::ScreenEdgeSlopY() const {
+@@ -3486,11 +3495,13 @@ double nsGlobalWindowInner::ScreenEdgeSlopY() const {
  
  int32_t nsGlobalWindowInner::GetScreenX(CallerType aCallerType,
                                          ErrorResult& aError) {
@@ -298,7 +114,7 @@ index 5f7f1c441019..a5592451e268 100644
    FORWARD_TO_OUTER_OR_THROW(GetScreenYOuter, (aCallerType, aError), aError, 0);
  }
  
-@@ -3530,6 +3541,8 @@ static nsPresContext* GetPresContextForRatio(Document* aDoc) {
+@@ -3524,6 +3535,8 @@ static nsPresContext* GetPresContextForRatio(Document* aDoc) {
  double nsGlobalWindowInner::GetDevicePixelRatio(CallerType aCallerType,
                                                  ErrorResult& aError) {
    ENSURE_ACTIVE_DOCUMENT(aError, 0.0);
@@ -307,7 +123,7 @@ index 5f7f1c441019..a5592451e268 100644
  
    RefPtr<nsPresContext> presContext = GetPresContextForRatio(mDoc);
    if (NS_WARN_IF(!presContext)) {
-@@ -3600,26 +3613,38 @@ already_AddRefed<MediaQueryList> nsGlobalWindowInner::MatchMedia(
+@@ -3594,26 +3607,38 @@ already_AddRefed<MediaQueryList> nsGlobalWindowInner::MatchMedia(
  }
  
  int32_t nsGlobalWindowInner::GetScrollMinX(ErrorResult& aError) {
@@ -347,45 +163,40 @@ index 5f7f1c441019..a5592451e268 100644
  }
  
 diff --git a/dom/base/nsHistory.cpp b/dom/base/nsHistory.cpp
-index aeb9a0add697..62523fbd7263 100644
+index e2fd8e6389..e5ddf4e08c 100644
 --- a/dom/base/nsHistory.cpp
 +++ b/dom/base/nsHistory.cpp
-@@ -5,6 +5,8 @@
+@@ -5,6 +5,7 @@
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
  
  #include "nsHistory.h"
-+#include <cstdint>
 +#include "MaskConfig.hpp"
  
  #include "jsapi.h"
- #include "nsCOMPtr.h"
-@@ -78,7 +80,12 @@ uint32_t nsHistory::GetLength(ErrorResult& aRv) const {
-   }
- 
-   int32_t len = sHistory->Count();
--  return len >= 0 ? len : 0;
-+  uint32_t result = len >= 0 ? len : 0;
-+
-+  if (auto value = MaskConfig::GetUint32("window.history.length"))
-+    result += value.value();
-+
-+  return result;
+ #include "mozilla/RefPtr.h"
+@@ -64,6 +65,8 @@ JSObject* nsHistory::WrapObject(JSContext* aCx,
  }
  
- ScrollRestoration nsHistory::GetScrollRestoration(
+ uint32_t nsHistory::GetLength(ErrorResult& aRv) const {
++  if (auto value = MaskConfig::GetUint32("window.history.length"))
++    return value.value();
+   nsCOMPtr<nsPIDOMWindowInner> win(do_QueryReferent(mInnerWindow));
+   if (!win || !win->HasActiveDocument()) {
+     aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
 diff --git a/dom/base/nsScreen.cpp b/dom/base/nsScreen.cpp
-index 8f76f268ece9..6954f865a322 100644
+index 306ab35772..7f7728a6cc 100644
 --- a/dom/base/nsScreen.cpp
 +++ b/dom/base/nsScreen.cpp
-@@ -4,6 +4,7 @@
-  * License, v. 2.0. If a copy of the MPL was not distributed with this
-  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+@@ -6,6 +6,8 @@
+ 
+ #include "nsScreen.h"
  
 +#include "MaskConfig.hpp"
- #include "nsContentUtils.h"
- #include "nsScreen.h"
++
+ #include "mozilla/GeckoBindings.h"
  #include "mozilla/dom/Document.h"
-@@ -39,6 +40,10 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(nsScreen, DOMEventTargetHelper,
+ #include "mozilla/dom/DocumentInlines.h"
+@@ -40,6 +42,10 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(nsScreen, DOMEventTargetHelper,
                                     mScreenOrientation)
  
  int32_t nsScreen::PixelDepth() {
@@ -396,7 +207,7 @@ index 8f76f268ece9..6954f865a322 100644
    // Return 24 to prevent fingerprinting.
    if (ShouldResistFingerprinting(RFPTarget::ScreenPixelDepth)) {
      return 24;
-@@ -88,6 +93,12 @@ CSSIntRect nsScreen::GetRect() {
+@@ -89,6 +95,12 @@ CSSIntRect nsScreen::GetRect() {
  }
  
  CSSIntRect nsScreen::GetAvailRect() {
@@ -410,18 +221,18 @@ index 8f76f268ece9..6954f865a322 100644
    if (ShouldResistFingerprinting(RFPTarget::ScreenAvailRect)) {
      return GetTopWindowInnerRectForRFP();
 diff --git a/dom/battery/BatteryManager.cpp b/dom/battery/BatteryManager.cpp
-index a42ac3017d86..fadae4a714ae 100644
+index 6322093fd9..264cc91bd1 100644
 --- a/dom/battery/BatteryManager.cpp
 +++ b/dom/battery/BatteryManager.cpp
-@@ -7,6 +7,7 @@
+@@ -9,6 +9,7 @@
  #include <cmath>
  #include <limits>
- #include "BatteryManager.h"
+ 
 +#include "MaskConfig.hpp"
  #include "Constants.h"
  #include "mozilla/DOMEventTargetHelper.h"
  #include "mozilla/Hal.h"
-@@ -51,6 +52,9 @@ JSObject* BatteryManager::WrapObject(JSContext* aCx,
+@@ -53,6 +54,9 @@ JSObject* BatteryManager::WrapObject(JSContext* aCx,
  
  bool BatteryManager::Charging() const {
    MOZ_ASSERT(NS_IsMainThread());
@@ -431,7 +242,7 @@ index a42ac3017d86..fadae4a714ae 100644
    // For testing, unable to report the battery status information
    if (Preferences::GetBool("dom.battery.test.default", false)) {
      return true;
-@@ -67,6 +71,8 @@ bool BatteryManager::Charging() const {
+@@ -69,6 +73,8 @@ bool BatteryManager::Charging() const {
  
  double BatteryManager::DischargingTime() const {
    MOZ_ASSERT(NS_IsMainThread());
@@ -440,7 +251,7 @@ index a42ac3017d86..fadae4a714ae 100644
    // For testing, unable to report the battery status information
    if (Preferences::GetBool("dom.battery.test.default", false)) {
      return std::numeric_limits<double>::infinity();
-@@ -84,6 +90,8 @@ double BatteryManager::DischargingTime() const {
+@@ -86,6 +92,8 @@ double BatteryManager::DischargingTime() const {
  
  double BatteryManager::ChargingTime() const {
    MOZ_ASSERT(NS_IsMainThread());
@@ -449,7 +260,7 @@ index a42ac3017d86..fadae4a714ae 100644
    // For testing, unable to report the battery status information
    if (Preferences::GetBool("dom.battery.test.default", false)) {
      return 0.0;
-@@ -101,6 +109,7 @@ double BatteryManager::ChargingTime() const {
+@@ -103,6 +111,7 @@ double BatteryManager::ChargingTime() const {
  
  double BatteryManager::Level() const {
    MOZ_ASSERT(NS_IsMainThread());
@@ -458,7 +269,7 @@ index a42ac3017d86..fadae4a714ae 100644
    if (Preferences::GetBool("dom.battery.test.default")) {
      return 1.0;
 diff --git a/dom/battery/moz.build b/dom/battery/moz.build
-index 3a90c93c01d5..91d673039bcb 100644
+index 3a90c93c01..91d673039b 100644
 --- a/dom/battery/moz.build
 +++ b/dom/battery/moz.build
 @@ -21,3 +21,6 @@ FINAL_LIBRARY = "xul"
@@ -470,7 +281,7 @@ index 3a90c93c01d5..91d673039bcb 100644
 +LOCAL_INCLUDES += ["/camoucfg"]
 \ No newline at end of file
 diff --git a/dom/workers/WorkerNavigator.cpp b/dom/workers/WorkerNavigator.cpp
-index 1563d6ce19fc..64dab8cdcd3e 100644
+index 622724b529..c9a65ff013 100644
 --- a/dom/workers/WorkerNavigator.cpp
 +++ b/dom/workers/WorkerNavigator.cpp
 @@ -5,6 +5,7 @@
@@ -528,7 +339,7 @@ index 1563d6ce19fc..64dab8cdcd3e 100644
    MOZ_ASSERT(rts);
  
 diff --git a/dom/workers/moz.build b/dom/workers/moz.build
-index 2f2948a7294f..b8ad10403ff3 100644
+index 2f2948a729..b8ad10403f 100644
 --- a/dom/workers/moz.build
 +++ b/dom/workers/moz.build
 @@ -114,3 +114,6 @@ MARIONETTE_MANIFESTS += ["test/marionette/manifest.toml"]

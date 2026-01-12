@@ -1,4 +1,4 @@
-version=142.0
-release=2
+version=146.0
+release=1
 closedsrc_rev=1.0.0
-ff_commit=e0df3d598dba47de812bb5144cbc187557377095
+ff_commit=FIREFOX_146_0_1_RELEASE

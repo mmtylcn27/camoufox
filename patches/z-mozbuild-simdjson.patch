@@ -1,14 +1,8 @@
-commit f59b6634bd82af4dcd26b661784b591c8a561bfd
-Author: Mehmet <mmt@mmt.com>
-Date:   Tue Dec 30 15:55:14 2025 +0300
-
-    Apply z-mozbuild-simdjson.patch
-
 diff --git a/browser/app/moz.build b/browser/app/moz.build
-index ac02abec0fc0..1a139b9e740f 100644
+index 4c8d9fe1763e..8c355e30cd2b 100644
 --- a/browser/app/moz.build
 +++ b/browser/app/moz.build
-@@ -182,4 +182,7 @@ else:
+@@ -188,4 +188,7 @@ else:
      WINCONSOLE = False
  
  # DOM Mask
@@ -33,10 +27,10 @@ index 0f73f2dd8203..9e14e8143732 100644
 +]
 \ No newline at end of file
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index 0598d58bfba3..53c4b192a53a 100644
+index 37a053579e35..4ff9c0665523 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -652,4 +652,7 @@ GeneratedFile(
+@@ -636,4 +636,7 @@ GeneratedFile(
  )
  
  # DOM Mask
@@ -63,20 +57,21 @@ index 91d673039bcb..4bcb19535746 100644
 +]
 \ No newline at end of file
 diff --git a/dom/canvas/moz.build b/dom/canvas/moz.build
-index 93fb0f513cf9..e15998a74258 100644
+index 77985da0fbe8..f2ff042756af 100644
 --- a/dom/canvas/moz.build
 +++ b/dom/canvas/moz.build
-@@ -231,4 +231,7 @@ if CONFIG["CC_TYPE"] == "gcc":
- include("/tools/fuzzing/libfuzzer-config.mozbuild")
+@@ -188,7 +188,10 @@ TEST_DIRS += [
+ # Suppress warnings from third-party code.
+ SOURCES["MurmurHash3.cpp"].flags += ["-Wno-implicit-fallthrough"]
  
- # DOM Mask
 -LOCAL_INCLUDES += ["/camoucfg"]
-\ No newline at end of file
 +LOCAL_INCLUDES += [
 +    "/camoucfg",
 +    "/third_party/simdjson/include",
 +]
-\ No newline at end of file
+ 
+ LOCAL_INCLUDES += [
+     "/js/xpconnect/wrappers",
 diff --git a/dom/geolocation/moz.build b/dom/geolocation/moz.build
 index 55bae7754e7d..b37355d94fb0 100644
 --- a/dom/geolocation/moz.build
@@ -90,10 +85,10 @@ index 55bae7754e7d..b37355d94fb0 100644
  
  if CONFIG["MOZ_WIDGET_TOOLKIT"] == "android":
 diff --git a/dom/media/moz.build b/dom/media/moz.build
-index 9fe37f8ed6d9..b56edef66d03 100644
+index 68fd2c62141a..ec62e0c7cb27 100644
 --- a/dom/media/moz.build
 +++ b/dom/media/moz.build
-@@ -424,4 +424,7 @@ FINAL_LIBRARY = "xul"
+@@ -421,4 +421,7 @@ FINAL_LIBRARY = "xul"
  SPHINX_TREES["/media"] = "docs"
  
  # DOM Mask
@@ -118,10 +113,10 @@ index 6a03f45bf7e4..8aaa1a2f0dbc 100644
 +]
 \ No newline at end of file
 diff --git a/dom/media/webrtc/jsapi/moz.build b/dom/media/webrtc/jsapi/moz.build
-index fb9c1133316d..d4ec4504c11d 100644
+index da26fe05ee5e..095a0c1b6527 100644
 --- a/dom/media/webrtc/jsapi/moz.build
 +++ b/dom/media/webrtc/jsapi/moz.build
-@@ -69,4 +69,7 @@ EXPORTS.mozilla.dom += [
+@@ -70,4 +70,7 @@ EXPORTS.mozilla.dom += [
  FINAL_LIBRARY = "xul"
  
  # DOM Mask
@@ -133,7 +128,7 @@ index fb9c1133316d..d4ec4504c11d 100644
 +]
 \ No newline at end of file
 diff --git a/dom/media/webspeech/synth/moz.build b/dom/media/webspeech/synth/moz.build
-index e238b8d41847..5667c8afc81b 100644
+index 5c20c9f0fb87..695feb5065c2 100644
 --- a/dom/media/webspeech/synth/moz.build
 +++ b/dom/media/webspeech/synth/moz.build
 @@ -64,4 +64,7 @@ LOCAL_INCLUDES += [
@@ -141,12 +136,10 @@ index e238b8d41847..5667c8afc81b 100644
  
  # DOM Mask
 -LOCAL_INCLUDES += ['/camoucfg']
-\ No newline at end of file
 +LOCAL_INCLUDES += [
 +    "/camoucfg",
 +    "/third_party/simdjson/include",
 +]
-\ No newline at end of file
 diff --git a/dom/workers/moz.build b/dom/workers/moz.build
 index b8ad10403ff3..e5c4492dc628 100644
 --- a/dom/workers/moz.build
@@ -208,10 +201,10 @@ index 72213b13cf69..cb87edff4021 100644
 +]
 \ No newline at end of file
 diff --git a/layout/style/moz.build b/layout/style/moz.build
-index 1b13537577e7..811dc67ae723 100644
+index 95b63b24bf52..835dfc693dc1 100644
 --- a/layout/style/moz.build
 +++ b/layout/style/moz.build
-@@ -365,4 +365,7 @@ if CONFIG["COMPILE_ENVIRONMENT"]:
+@@ -381,4 +381,7 @@ if CONFIG["COMPILE_ENVIRONMENT"]:
      )
  
  # DOM Mask
@@ -234,10 +227,10 @@ index 4ef610890b2f..61b63a14e04a 100644
 +    "/third_party/simdjson",
 +]
 diff --git a/netwerk/protocol/http/moz.build b/netwerk/protocol/http/moz.build
-index d1cd8ce368dd..b46b00b8ded4 100644
+index a5ea8561732d..6620616776af 100644
 --- a/netwerk/protocol/http/moz.build
 +++ b/netwerk/protocol/http/moz.build
-@@ -246,4 +246,7 @@ XPCOM_MANIFESTS += [
+@@ -248,4 +248,7 @@ XPCOM_MANIFESTS += [
  include("/tools/fuzzing/libfuzzer-config.mozbuild")
  
  # DOM Mask

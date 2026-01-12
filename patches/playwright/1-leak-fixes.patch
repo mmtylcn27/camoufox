@@ -2,16 +2,7 @@ diff --git a/dom/base/Navigator.cpp b/dom/base/Navigator.cpp
 index 7c1bcfdba325..14af0ac65ce5 100644
 --- a/dom/base/Navigator.cpp
 +++ b/dom/base/Navigator.cpp
-@@ -358,7 +358,7 @@ void Navigator::GetAcceptLanguages(const nsString* aLanguageOverride, nsTArray<n
-     acceptLang = *aLanguageOverride;
-   else
-     Preferences::GetLocalizedString("intl.accept_languages", acceptLang);
--    
-+
- 
-   // Split values on commas.
-   for (nsDependentSubstring lang :
-@@ -2319,8 +2319,7 @@ bool Navigator::Webdriver() {
+@@ -2336,8 +2336,7 @@ bool Navigator::Webdriver() {
    }
  #endif
  
