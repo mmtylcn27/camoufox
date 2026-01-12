@@ -27,7 +27,7 @@ index 0f73f2dd8203..9e14e8143732 100644
 +]
 \ No newline at end of file
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index 37a053579e35..4ff9c0665523 100644
+index b247b34c89f6..a246eae2f85a 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
 @@ -636,4 +636,7 @@ GeneratedFile(
@@ -35,14 +35,12 @@ index 37a053579e35..4ff9c0665523 100644
  
  # DOM Mask
 -LOCAL_INCLUDES += ["/camoucfg"]
-\ No newline at end of file
 +LOCAL_INCLUDES += [
 +    "/camoucfg",
 +    "/third_party/simdjson/include",
 +]
-\ No newline at end of file
 diff --git a/dom/battery/moz.build b/dom/battery/moz.build
-index 91d673039bcb..4bcb19535746 100644
+index ce6881a758e3..85b0dac25cbe 100644
 --- a/dom/battery/moz.build
 +++ b/dom/battery/moz.build
 @@ -23,4 +23,7 @@ MOCHITEST_CHROME_MANIFESTS += ["test/chrome.toml"]
@@ -50,12 +48,10 @@ index 91d673039bcb..4bcb19535746 100644
  
  # DOM Mask
 -LOCAL_INCLUDES += ["/camoucfg"]
-\ No newline at end of file
 +LOCAL_INCLUDES += [
 +    "/camoucfg",
 +    "/third_party/simdjson/include",
 +]
-\ No newline at end of file
 diff --git a/dom/canvas/moz.build b/dom/canvas/moz.build
 index 77985da0fbe8..f2ff042756af 100644
 --- a/dom/canvas/moz.build
@@ -141,7 +137,7 @@ index 5c20c9f0fb87..695feb5065c2 100644
 +    "/third_party/simdjson/include",
 +]
 diff --git a/dom/workers/moz.build b/dom/workers/moz.build
-index b8ad10403ff3..e5c4492dc628 100644
+index 10dcf986d4e8..0a4837e17c5c 100644
 --- a/dom/workers/moz.build
 +++ b/dom/workers/moz.build
 @@ -116,4 +116,7 @@ XPCSHELL_TESTS_MANIFESTS += ["test/xpcshell/xpcshell.toml"]
@@ -149,12 +145,10 @@ index b8ad10403ff3..e5c4492dc628 100644
  
  # DOM Mask
 -LOCAL_INCLUDES += ["/camoucfg"]
-\ No newline at end of file
 +LOCAL_INCLUDES += [
 +    "/camoucfg",
 +    "/third_party/simdjson/include",
 +]
-\ No newline at end of file
 diff --git a/gfx/src/moz.build b/gfx/src/moz.build
 index faa0c113bc51..02047602b86e 100644
 --- a/gfx/src/moz.build

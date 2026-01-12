@@ -1,5 +1,5 @@
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index 3128b88f75cf..5322d2538849 100644
+index bc0e123f85..52ec46f76b 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
 @@ -13,6 +13,7 @@
@@ -10,7 +10,7 @@ index 3128b88f75cf..5322d2538849 100644
  
  #include "GeckoProfiler.h"
  #include "nsCRT.h"
-@@ -306,6 +307,16 @@ gfxPlatformFontList::gfxPlatformFontList(bool aNeedFullnamePostscriptNames)
+@@ -303,6 +304,16 @@ gfxPlatformFontList::gfxPlatformFontList(bool aNeedFullnamePostscriptNames)
  
    mFontPrefs = MakeUnique<FontPrefs>();
  
@@ -28,22 +28,22 @@ index 3128b88f75cf..5322d2538849 100644
    mFontFamilyWhitelistActive = !mEnabledFontsList.IsEmpty();
  
 diff --git a/gfx/thebes/moz.build b/gfx/thebes/moz.build
-index ea2e2cca6ae3..7efb2bb8f7a1 100644
+index 3d99906827..a9d1191688 100644
 --- a/gfx/thebes/moz.build
 +++ b/gfx/thebes/moz.build
-@@ -299,3 +299,6 @@ DEFINES["GRAPHITE2_STATIC"] = True
+@@ -301,3 +301,6 @@ DEFINES["GRAPHITE2_STATIC"] = True
  CXXFLAGS += ["-Werror=switch"]
- 
+
  include("/tools/fuzzing/libfuzzer-config.mozbuild")
 +
 +# DOM Mask
 +LOCAL_INCLUDES += ["/camoucfg"]
 \ No newline at end of file
 diff --git a/layout/style/FontFace.cpp b/layout/style/FontFace.cpp
-index 4ce50df96394..2acede504ed3 100644
+index f1a90334ea..47d3a881ac 100644
 --- a/layout/style/FontFace.cpp
 +++ b/layout/style/FontFace.cpp
-@@ -244,7 +244,16 @@ void FontFace::SetSizeAdjust(const nsACString& aValue, ErrorResult& aRv) {
+@@ -237,7 +237,16 @@ void FontFace::SetSizeAdjust(const nsACString& aValue, ErrorResult& aRv) {
    mImpl->SetSizeAdjust(aValue, aRv);
  }
  
@@ -61,7 +61,7 @@ index 4ce50df96394..2acede504ed3 100644
  
  Promise* FontFace::Load(ErrorResult& aRv) {
    EnsurePromise();
-@@ -254,7 +263,17 @@ Promise* FontFace::Load(ErrorResult& aRv) {
+@@ -247,7 +256,17 @@ Promise* FontFace::Load(ErrorResult& aRv) {
      return nullptr;
    }
  
@@ -81,10 +81,10 @@ index 4ce50df96394..2acede504ed3 100644
  }
  
 diff --git a/layout/style/FontFaceImpl.cpp b/layout/style/FontFaceImpl.cpp
-index acd256a7898c..69e4cab61b72 100644
+index 9d1f7c8c5b..926315ca2f 100644
 --- a/layout/style/FontFaceImpl.cpp
 +++ b/layout/style/FontFaceImpl.cpp
-@@ -359,21 +359,15 @@ void FontFaceImpl::DoLoad() {
+@@ -357,22 +357,16 @@ void FontFaceImpl::DoLoad() {
  void FontFaceImpl::SetStatus(FontFaceLoadStatus aStatus) {
    gfxFontUtils::AssertSafeThreadOrServoFontMetricsLocked();
  
@@ -112,19 +112,20 @@ index acd256a7898c..69e4cab61b72 100644
    if (mInFontFaceSet) {
      mFontFaceSet->OnFontFaceStatusChanged(this);
    }
+ 
 diff --git a/layout/style/FontFaceImpl.h b/layout/style/FontFaceImpl.h
-index c677d2c40f2c..dd13db8b3ddc 100644
+index 70c06609e9..66b2666621 100644
 --- a/layout/style/FontFaceImpl.h
 +++ b/layout/style/FontFaceImpl.h
-@@ -12,6 +12,7 @@
- #include "mozilla/RWLock.h"
+@@ -13,6 +13,7 @@
  #include "mozilla/ServoStyleConsts.h"
  #include "mozilla/dom/FontFaceBinding.h"
 +#include "MaskConfig.hpp"
  #include "nsTHashSet.h"
- 
+
  class gfxFontFaceBufferSource;
-@@ -32,6 +33,20 @@ class UTF8StringOrArrayBufferOrArrayBufferView;
+
+@@ -33,6 +34,20 @@
  
  namespace mozilla::dom {
  
@@ -146,10 +147,11 @@ index c677d2c40f2c..dd13db8b3ddc 100644
    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(FontFaceImpl)
  
 diff --git a/layout/style/moz.build b/layout/style/moz.build
-index 31b60521db74..1b13537577e7 100644
+index a14ab6a7ac..6e6a727abf 100644
 --- a/layout/style/moz.build
 +++ b/layout/style/moz.build
-@@ -363,3 +363,6 @@ if CONFIG["COMPILE_ENVIRONMENT"]:
+@@ -378,4 +378,7 @@
+     CbindgenHeader(
          "ServoStyleConsts.h",
          inputs=["/servo/ports/geckolib", "/servo/components/style"],
      )
