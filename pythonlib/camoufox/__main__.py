@@ -83,16 +83,29 @@ def fetch(browserforge=False) -> None:
     """
     Fetch the latest version of Camoufox and optionally update Browserforge's database
     """
-    CamoufoxUpdate().update()
-    # Fetch the GeoIP database
-    if ALLOW_GEOIP:
-        download_mmdb()
+    try:
+        CamoufoxUpdate().update()
+    except Exception as e:
+        rprint(f"Error updating Camoufox: {e}", fg="red")
 
-    # Download default addons
-    maybe_download_addons(list(DefaultAddons))
+    try:
+        # Fetch the GeoIP database
+        if ALLOW_GEOIP:
+            download_mmdb()
+    except Exception as e:
+        rprint(f"Error downloading GeoIP database: {e}", fg="red")
+        
+    try:
+        # Download default addons
+        maybe_download_addons(list(DefaultAddons))
+    except Exception as e:
+        rprint(f"Error downloading default addons: {e}", fg="red")
 
-    if browserforge:
-        update_browserforge(headers=True, fingerprints=True)
+    try:
+        if browserforge:
+            update_browserforge(headers=True, fingerprints=True)
+    except Exception as e:
+        rprint(f"Error updating Browserforge databases: {e}", fg="red")
 
 
 @cli.command(name='remove')
