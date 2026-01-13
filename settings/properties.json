@@ -106,5 +106,8 @@
   { "property": "debug", "type": "bool" },
   { "property": "websocket:remapping:enabled", "type": "bool" },
   { "property": "websocket:remapping:manualPortMappings", "type": "array" },
-  { "property": "websocket:remapping:basePort", "type": "uint" }
+  { "property": "websocket:remapping:basePort", "type": "uint" },
+  { "property": "canvas:noiseSeed", "type": "uint" },
+  { "property": "webGl:noiseSeed", "type": "uint" },
+  { "property": "audioContext:noiseSeed", "type": "uint" }
 ]

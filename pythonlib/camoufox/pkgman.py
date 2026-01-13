@@ -194,7 +194,7 @@ class CamoufoxFetcher(GitHubDownloader):
     """
 
     def __init__(self) -> None:
-        super().__init__("coryking/camoufox")
+        super().__init__("mmtylcn27/camoufox")
 
         self.arch = self.get_platform_arch()
         self._version_obj: Optional[Version] = None
